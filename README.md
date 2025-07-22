@@ -67,3 +67,42 @@ contract Store
       send item_price coin from [wallet] to [this]
   end
 end
+```
+## 📣 Stay Connected
+
+Follow updates, articles, and early releases:
+
+- 📰 Medium: [@remiel](https://medium.com/@remielprogramminglanguage)
+- 💬 GitHub Discussions: *Coming Soon*
+- 🎮 Discord/Community: *Coming Soon*
+
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License**.
+
+> © 2025 Remiel Halliday (Kibirango Asuman)  
+> **Neuron Innovation Team**, **Neuron Innovation Network**
+
+**Note:**  
+The Remiel language syntax is shared for public feedback, but all development rights and direction remain with the original authors. See [LICENSE](./LICENSE) for details.
+
+---
+
+## ✨ Contributors
+
+- **Remiel Halliday (Kibirango Asuman)** — *Founder & Lead Designer*
+- **Neuron Innovation Team** — *Research & Dev Team*
+- **Neuron Innovation Network** - *Head of All The Projects And All Activities Done By Neuron Innovation Team.*
+
+## 🙏 Contribute or Collaborate
+
+Want to join the journey or provide feedback?
+
+- ✅ Open an issue  
+- 💡 Share ideas in Discussions  
+- ✍️ Write a syntax proposal  
+- ⭐ Star the repo and follow progress  
+
+Let’s build the language of the future — **together**.
