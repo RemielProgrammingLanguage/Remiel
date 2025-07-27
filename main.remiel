@@ -1,0 +1,7 @@
+strict_mode
+
+start
+  keep [username] = receive()
+  keep [age] = 21
+  show ["Hello, Remiel"]
+end
