@@ -1,109 +1,240 @@
 # remiel/parser.py
 
-from remiel.lexer import RemielLexer, Token
-from typing import List
+from remiel.token_type import TokenType
+from remiel.token import Token
 
-# ----------------------------
-# AST Node Definitions
-# ----------------------------
+class ParserError(Exception):
+    pass
 
-class ASTNode: pass
-
-class Program(ASTNode):
-    def __init__(self, mode: str, body: List[ASTNode]):
-        self.mode = mode
-        self.body = body
-
-class ShowCommand(ASTNode):
-    def __init__(self, value: str):
-        self.value = value
-
-class KeepCommand(ASTNode):
-    def __init__(self, name: str, value: ASTNode):
-        self.name = name
-        self.value = value
-
-class ReceiveCall(ASTNode): pass
-
-class Literal(ASTNode):
-    def __init__(self, value):
-        self.value = value
-
-# ----------------------------
-# Parser Class
-# ----------------------------
-
-class RemielParser:
-    def __init__(self, tokens: List[Token]):
+class Parser:
+    def __init__(self, tokens):
         self.tokens = tokens
         self.current = 0
 
-    def parse(self) -> Program:
-        mode_token = self._consume("MODE", "Expected mode declaration (strict_mode, etc)")
-        self._consume("START", "Expected 'start'")
-        body = []
+    def parse(self):
+        statements = []
 
-        while not self._check("END") and not self._is_at_end():
-            body.append(self._parse_statement())
+        while not self.is_at_end():
+            stmt = self.statement()
+            if stmt:
+                statements.append(stmt)
 
-        self._consume("END", "Expected 'end'")
-        return Program(mode_token.value, body)
+        return statements
+    # ------------------------
+    #Mode Declaration
+    #------------------------
+    def mode_declaration(self):
+     tok = self.advance()  # Consume the mode token (MODE_STRICT, etc.)
+     return {"type": "ModeDeclaration", "mode": tok.type.name}
+    # ------------------------
+    # Statement Parsing
+    # ------------------------
+    def statement(self):
+     tok = self.peek()
 
-    def _parse_statement(self) -> ASTNode:
-        if self._match("SHOW"):
-            self._consume("LBRACKET", "Expected '[' after 'show'")
-            string_token = self._consume("STRING", "Expected string inside show")
-            self._consume("RBRACKET", "Expected ']' after string")
-            return ShowCommand(string_token.value)
+     if tok.type in (TokenType.MODE_STRICT, TokenType.MODE_DYNAMIC, TokenType.MODE_UNIVERSAL):
+         return self.mode_declaration()
+     elif tok.type == TokenType.START:
+         return self.program_block()
+     elif tok.type == TokenType.SHOW:
+         return self.show_statement()
+     elif tok.type == TokenType.KEEP:
+         return self.keep_statement()
+     elif self.check(TokenType.RECEIVE):
+          value = self.parse_receive()
+     elif tok.type in (TokenType.TYPE_NATURAL, TokenType.TYPE_POINT, TokenType.TYPE_TEXT, TokenType.TYPE_FLIP):
+         return self.typed_keep_statement()  
+     elif tok.type in (TokenType.COMMENT_SINGLE, TokenType.COMMENT_MULTI_START):
+         self.skip_comment()
+         return None
+     elif tok.type == TokenType.EXPLAIN:
+         return self.explain_comment()
+     else:
+         self.error(tok, f"Unexpected token: {tok.type}")
+         return None
+    def program_block(self):
+     self.consume(TokenType.START, "Expected 'start'")
+     body = []
 
-        elif self._match("KEEP"):
-            self._consume("LBRACKET", "Expected '[' after 'keep'")
-            name_token = self._consume("IDENTIFIER", "Expected variable name")
-            self._consume("RBRACKET", "Expected ']' after variable name")
-            self._consume("EQUAL", "Expected '='")
+     while not self.check(TokenType.END) and not self.is_at_end():
+         stmt = self.statement()
+         if stmt:
+             body.append(stmt)
 
-            if self._match("RECEIVE"):
-                self._consume("LPAREN", "Expected '(' after receive")
-                self._consume("RPAREN", "Expected ')'")
-                return KeepCommand(name_token.value, ReceiveCall())
+     self.consume(TokenType.END, "Expected 'end'")
+     return {
+         "type": "block",
+         "statements": body
+     }
+    def show_statement(self):
+     self.consume(TokenType.SHOW, "Expected 'show'")
+     self.consume(TokenType.LBRACKET, "Expected '[' after 'show'")
 
-            elif self._check("NUMBER") or self._check("STRING"):
-                value_token = self._advance()
-                return KeepCommand(name_token.value, Literal(value_token.value))
+     expr_tokens = []  # Initialize the list to collect tokens
 
-            else:
-                raise SyntaxError(f"Invalid value after keep at line {self._peek().line}")
+     # Collect tokens until we reach the closing bracket or end of input
+     while not self.check(TokenType.RBRACKET) and not self.is_at_end():
+         expr_tokens.append(self.advance())
 
-        else:
-            raise SyntaxError(f"Unexpected token '{self._peek().value}' at line {self._peek().line}")
+     self.consume(TokenType.RBRACKET, "Expected ']' after show expression")
 
-    # ----------------------------
-    # Helpers
-    # ----------------------------
+     return {
+         "type": "show",
+         "expression": expr_tokens
+     }
+    def typed_keep_statement(self):
+     # Consume the type first
+     type_token = self.advance()
 
-    def _match(self, *types):
-        if self._check(*types):
-            self._advance()
-            return True
+     # Now expect `keep`
+     self.consume(TokenType.KEEP, "Expected 'keep' after type declaration")
+
+     self.consume(TokenType.LBRACKET, "Expected '[' before variable name")
+
+     identifier = self.consume(TokenType.IDENTIFIER, "Expected variable name")
+
+     self.consume(TokenType.RBRACKET, "Expected ']' after variable name")
+
+     self.consume(TokenType.ASSIGN, "Expected '=' after variable name")
+
+     # Now determine value by type
+     if type_token.type == TokenType.TYPE_NATURAL:
+         value_token = self.consume(TokenType.NATURAL_LITERAL, "Expected natural literal")
+     elif type_token.type == TokenType.TYPE_POINT:
+         value_token = self.consume(TokenType.POINT_LITERAL, "Expected point literal")
+     elif type_token.type == TokenType.TYPE_TEXT:
+         value_token = self.consume(TokenType.TEXT_LITERAL, "Expected text literal")
+     elif type_token.type == TokenType.TYPE_FLIP:
+         value_token = self.consume(TokenType.BOOLEAN_LITERAL, "Expected flip literal")
+     else:
+         raise self.error(type_token, f"Unknown type: {type_token.type}")
+
+     # Return some AST node (simplified)
+     return {
+         "type": "typed_keep",
+         "datatype": type_token.type,
+         "name": identifier.value,
+         "value": value_token.value
+     }
+    def keep_statement(self):
+     self.consume(TokenType.KEEP, "Expected 'keep' keyword")
+
+     self.consume(TokenType.LBRACKET, "Expected '[' before variable name")
+     identifier = self.consume(TokenType.IDENTIFIER, "Expected variable name")
+     self.consume(TokenType.RBRACKET, "Expected ']' after variable name")
+
+     self.consume(TokenType.ASSIGN, "Expected '=' after variable name")
+
+     # Now determine what kind of value follows (literal or expression)
+     value_token = self.peek()
+
+     if value_token.type in (
+         TokenType.NATURAL_LITERAL,
+         TokenType.POINT_LITERAL,
+         TokenType.TEXT_LITERAL,
+         TokenType.BOOLEAN_LITERAL,
+         TokenType.IDENTIFIER,
+     ):
+         value = self.advance()
+     elif value_token.type == TokenType.RECEIVE:
+         value = self.parse_receive()
+     else:
+         self.error(value_token, f"Unexpected value in 'keep' assignment")
+
+     return {
+      "type": "keep",
+      "name": identifier.value,
+      "value": value.value if isinstance(value, Token) else value,
+      "value_type": value.type if isinstance(value, Token) else None
+     }
+    #________________
+    #Parse
+    #________________
+    def parse_receive(self):
+        # Parses: receive()
+        self.consume(TokenType.RECEIVE, "Expected 'receive' keyword")
+        self.consume(TokenType.LPAREN, "Expected '(' after 'receive'")
+        self.consume(TokenType.RPAREN, "Expected ')' after '(' in receive")
+
+        return {
+            "type": "receive_call"
+        }
+    # ------------------------
+    # Expressions
+    # ------------------------
+    def expression(self):
+        if self.match(TokenType.MATH):
+            return self.math_expr()
+        return self.advance()
+
+    def math_expr(self):
+        self.consume(TokenType.MATH, "Expected 'math'")
+        self.consume(TokenType.LEFT_BRACE, "Expected '{'")
+        expr_tokens = []
+
+        while not self.check(TokenType.RIGHT_BRACE) and not self.is_at_end():
+            expr_tokens.append(self.advance())
+
+        self.consume(TokenType.RIGHT_BRACE, "Expected '}' after math expression")
+        return ("math", expr_tokens)
+
+    # ------------------------
+    # Utilities
+    # ------------------------
+    def match(self, *types):
+        for t in types:
+            if self.check(t):
+                self.advance()
+                return True
         return False
 
-    def _check(self, *types):
-        if self._is_at_end():
+    def consume(self, type_, message):
+        if self.check(type_):
+            return self.advance()
+        self.error(self.peek(), message)
+
+    def check(self, type_):
+        if self.is_at_end():
             return False
-        return self._peek().type in types
+        return self.peek().type == type_
 
-    def _advance(self) -> Token:
-        if not self._is_at_end():
+    def advance(self):
+        if not self.is_at_end():
             self.current += 1
-        return self.tokens[self.current - 1]
+        return self.previous()
 
-    def _consume(self, type_, message):
-        if self._check(type_):
-            return self._advance()
-        raise SyntaxError(message + f" at line {self._peek().line}")
-
-    def _peek(self) -> Token:
+    def peek(self):
         return self.tokens[self.current]
 
-    def _is_at_end(self):
-        return self._peek().type == "EOF"
+    def previous(self):
+        return self.tokens[self.current - 1]
+
+    def is_at_end(self):
+        return self.peek().type == TokenType.EOF
+
+    def error(self, token, message):
+    # Try to get line info
+     if hasattr(token, 'pos'):
+         line = token.pos[0]
+     elif hasattr(token, 'line'):
+         line = token.line
+     else:
+         line = "unknown"
+     raise ParserError(f"[Line {line}] Error at '{token.value}': {message}")
+   #############
+   #Skip Comment
+   #############
+    def skip_comment(self):
+     tok = self.advance()
+
+     # If it's a single-line comment, just skip
+     if tok.type == TokenType.COMMENT_SINGLE:
+         return
+
+     # If it's a multi-line comment, skip until the end marker
+     if tok.type == TokenType.COMMENT_MULTI_START:
+         while not self.match(TokenType.COMMENT_MULTI_END):
+             if self.is_at_end():
+                 self.error(tok, "Unterminated multi-line comment")
+                 break
+             self.advance()

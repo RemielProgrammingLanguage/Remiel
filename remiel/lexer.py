@@ -1,110 +1,163 @@
 # remiel/lexer.py
 
-import re
-from dataclasses import dataclass
-from typing import List, Optional
+from remiel.token_type import TokenType
+from remiel.token import Token
+from remiel.stream import CharStream
 
-# ----------------------------
-# Token Representation
-# ----------------------------
-@dataclass
-class Token:
-    type: str
-    value: str
-    line: int
-    column: int
-
-# ----------------------------
-# Lexer Class
-# ----------------------------
 class RemielLexer:
-    def __init__(self, source: str):
-        self.source = source
-        self.tokens: List[Token] = []
-        self.current = 0
-        self.line = 1
-        self.column = 1
+    def __init__(self, source):
+        self.stream = CharStream(source)
+        self.tokens = []
+        self.in_multiline_comment = False
 
-    def lex(self) -> List[Token]:
-        while not self._is_at_end():
-            start_column = self.column
-            char = self._advance()
+        self.keywords = {
+            'strict_mode': TokenType.MODE_STRICT,
+            'dynamic_mode': TokenType.MODE_DYNAMIC,
+            'universal_mode': TokenType.MODE_UNIVERSAL,
 
-            if char in ' \t':
-                self.column += 1
-                continue
-            elif char == '\n':
-                self.line += 1
-                self.column = 1
-                continue
-            elif char == '[':
-                self._add_token("LBRACKET", '[', start_column)
-            elif char == ']':
-                self._add_token("RBRACKET", ']', start_column)
-            elif char == '=':
-                self._add_token("EQUAL", '=', start_column)
-            elif char == '(':
-                self._add_token("LPAREN", '(', start_column)
-            elif char == ')':
-                self._add_token("RPAREN", ')', start_column)
-            elif char == '"':
-                self._lex_string(start_column)
-            elif char.isalpha() or char == '_':
-                self._lex_identifier_or_keyword(char, start_column)
-            elif char.isdigit():
-                self._lex_number(char, start_column)
-            else:
-                self._add_token("UNKNOWN", char, start_column)
+            'start': TokenType.START,
+            'end': TokenType.END,
 
-        self.tokens.append(Token("EOF", "", self.line, self.column))
-        return self.tokens
+            'show': TokenType.SHOW,
+            'keep': TokenType.KEEP,
+            'receive': TokenType.RECEIVE,
+            'math': TokenType.MATH,
 
-    def _lex_string(self, start_column):
-        value = ''
-        while not self._is_at_end() and self._peek() != '"':
-            value += self._advance()
-        if self._is_at_end():
-            raise SyntaxError(f"Unterminated string at line {self.line}")
-        self._advance()  # Consume closing quote
-        self._add_token("STRING", value, start_column)
+            'natural': TokenType.TYPE_NATURAL,
+            'point': TokenType.TYPE_POINT,
+            'text': TokenType.TYPE_TEXT,
+            'flip': TokenType.TYPE_FLIP,
 
-    def _lex_identifier_or_keyword(self, first_char, start_column):
-        value = first_char
-        while not self._is_at_end() and (self._peek().isalnum() or self._peek() == '_'):
-            value += self._advance()
-
-        keywords = {
-            "strict_mode": "MODE",
-            "dynamic_mode": "MODE",
-            "universal_mode": "MODE",
-            "start": "START",
-            "end": "END",
-            "show": "SHOW",
-            "keep": "KEEP",
-            "receive": "RECEIVE"
+            'true': TokenType.BOOLEAN_LITERAL,
+            'false': TokenType.BOOLEAN_LITERAL,
         }
 
-        token_type = keywords.get(value, "IDENTIFIER")
-        self._add_token(token_type, value, start_column)
+        self.symbols = {
+            '=': TokenType.ASSIGN,
+            '[': TokenType.LBRACKET,
+            ']': TokenType.RBRACKET,
+            '{': TokenType.LBRACE,
+            '}': TokenType.RBRACE,
+            ',': TokenType.COMMA,
+            '+': TokenType.PLUS,
+            '-': TokenType.MINUS,
+            '*': TokenType.MUL,
+            '/': TokenType.DIV,
+            '%': TokenType.MOD,
+            '^': TokenType.POW,
+            '(': TokenType.LPAREN,
+            ')': TokenType.RPAREN,
+        }
 
-    def _lex_number(self, first_char, start_column):
-        value = first_char
-        while not self._is_at_end() and self._peek().isdigit():
-            value += self._advance()
-        self._add_token("NUMBER", value, start_column)
+    def tokenize(self):
+        while True:
+            self._skip_whitespace()
+            pos = self.stream.position()
+            char = self.stream.peek()
 
-    def _add_token(self, type_: str, value: str, column: int):
-        self.tokens.append(Token(type_, value, self.line, column))
+            if char == '\0':
+                self.tokens.append(Token(TokenType.EOF, None, pos))
+                break
 
-    def _advance(self) -> str:
-        char = self.source[self.current]
-        self.current += 1
-        return char
+            if self.in_multiline_comment:
+                if self._check("!"):
+                    self.stream.advance()
+                    self.tokens.append(Token(TokenType.COMMENT_MULTI_END, "!", pos))
+                    self.in_multiline_comment = False
+                else:
+                    self.stream.advance()
+                continue
 
-    def _peek(self) -> str:
-        if self._is_at_end():
-            return '\0'
-        return self.source[self.current]
+            if self._check("note:"):
+                self._consume_line_comment()
+                continue
+            if self._check("explain:!"):
+                self._consume_multiline_comment_start()
+                continue
+            elif char == '"':
+                self.tokens.append(self._string())
+            elif char.isdigit():
+                self.tokens.append(self._number())
+            elif char.isalpha() or char == '_':
+                self.tokens.append(self._identifier_or_keyword())
+            elif char in self.symbols:
+                self.tokens.append(self._symbol())
+            else:
+                raise Exception(f"Unknown character '{char}' at {pos}")
 
-    def _is_at_end(self) -> bool:
-        return self.current >= len(self.source)
+        return self.tokens
+
+    def _check(self, string):
+        for i in range(len(string)):
+            if self.stream.peek(i) != string[i]:
+                return False
+        return True
+
+    def _skip_whitespace(self):
+        while self.stream.peek().isspace():
+            self.stream.advance()
+
+    def _consume_line_comment(self):
+        pos = self.stream.position()
+        content = ""
+        while self.stream.peek() != '\n' and self.stream.peek() != '\0':
+            content += self.stream.advance()
+        self.tokens.append(Token(TokenType.COMMENT_SINGLE, content, pos))
+
+    def _consume_multiline_comment_start(self):
+        pos = self.stream.position()
+        self.stream.advance()  # e
+        self.stream.advance()  # x
+        self.stream.advance()  # p
+        self.stream.advance()  # l
+        self.stream.advance()  # a
+        self.stream.advance()  # i
+        self.stream.advance()  # n
+        self.stream.advance()  # :
+        self.stream.advance()  # !
+        self.tokens.append(Token(TokenType.COMMENT_MULTI_START, "explain:!", pos))
+        self.in_multiline_comment = True
+
+    def _string(self):
+        pos = self.stream.position()
+        self.stream.advance()  # skip opening "
+        value = ""
+        while self.stream.peek() != '"' and self.stream.peek() != '\0':
+            value += self.stream.advance()
+        if self.stream.peek() != '"':
+            raise Exception(f"Unclosed string at {pos}")
+        self.stream.advance()  # skip closing "
+        return Token(TokenType.TEXT_LITERAL, value, pos)
+
+    def _number(self):
+        pos = self.stream.position()
+        value = ""
+        is_float = False
+        while self.stream.peek().isdigit() or self.stream.peek() == '.':
+            if self.stream.peek() == '.':
+                if is_float:
+                    break
+                is_float = True
+            value += self.stream.advance()
+
+        return Token(
+            TokenType.POINT_LITERAL if is_float else TokenType.NATURAL_LITERAL,
+            float(value) if is_float else int(value),
+            pos
+        )
+
+    def _identifier_or_keyword(self):
+        pos = self.stream.position()
+        ident = ""
+        while self.stream.peek().isalnum() or self.stream.peek() == '_':
+            ident += self.stream.advance()
+
+        token_type = self.keywords.get(ident, TokenType.IDENTIFIER)
+        value = ident if token_type == TokenType.IDENTIFIER else None
+        return Token(token_type, value, pos)
+
+    def _symbol(self):
+        pos = self.stream.position()
+        char = self.stream.advance()
+        token_type = self.symbols.get(char)
+        return Token(token_type, char, pos)
