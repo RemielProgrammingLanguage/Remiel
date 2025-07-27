@@ -1,7 +1,16 @@
 strict_mode
 
 start
-  keep [username] = receive()
-  keep [age] = 21
-  show ["Hello, Remiel"]
+  note: this is a comment
+  explain:!
+    this is a
+    multi-line comment
+  !
+  natural keep [age] = 17
+  point keep [pi] = 3.14
+  text keep [name] = "Remiel"
+  flip keep [alive] = true
+
+  show [math { age + 2 }]
+  keep [user] = receive()
 end
