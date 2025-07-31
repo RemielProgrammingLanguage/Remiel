@@ -1,24 +1,24 @@
-# remiel/interpreter.py
-
 from remiel.lexer import RemielLexer
-from remiel.parser import Parser
-from remiel.executor import Executor
+from remiel.parser import RemielParser, ParseError
+from remiel.executor import RemielExecutor
 
-def run_remiel(source_code: str):
-    lexer = RemielLexer(source_code)
-    tokens = lexer.tokenize()
+class RemielInterpreter:
+    def __init__(self, source_code):
+        self.source_code = source_code
 
-    parser = Parser(tokens)
-    ast = parser.parse()
+    def run(self):
+        try:
+            # Tokenize
+            lexer = RemielLexer(self.source_code)
+            tokens = lexer.tokenize()
 
-    executor = Executor()
-    executor.execute(ast)
+            # Parse
+            parser = RemielParser(tokens)
+            parser.parse()
 
-def main():
-    with open("main.remiel", "r") as f:
-        code = f.read()
+            # Execute
+            executor = RemielExecutor(tokens)
+            executor.execute()
 
-    run_remiel(code)
-
-if __name__ == "__main__":
-    main()
+        except (ParseError, RuntimeError) as e:
+            print("Error:", e)

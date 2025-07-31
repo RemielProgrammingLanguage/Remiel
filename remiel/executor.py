@@ -1,94 +1,40 @@
-# remiel/executor.py
+class RemielExecutor:
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.pos = 0
 
-class Executor:
-    def __init__(self):
-        # Store variables here
-        self.variables = {}
+    def current_token(self):
+        return self.tokens[self.pos] if self.pos < len(self.tokens) else None
 
-    def execute(self, node):
-        if isinstance(node, list):
-            # Execute a list of nodes (statements)
-            for stmt in node:
-                self.execute(stmt)
-            return
+    def consume(self, expected_type=None):
+        token = self.current_token()
+        if token is None:
+            raise RuntimeError("Unexpected end of input during execution")
+        if expected_type and token.type != expected_type:
+            raise RuntimeError(f"Expected {expected_type} but got {token.type} at line {token.line}")
+        self.pos += 1
+        return token
 
-        if not isinstance(node, dict):
-            raise Exception(f"Invalid AST node: {node}")
-
-        node_type = node.get("type")
-
-        if node_type == "block":
-            for stmt in node.get("statements", []):
-                self.execute(stmt)
-
-        elif node_type == "ModeDeclaration":
-            # For now just print or store mode info
-            print(f"[Mode] Mode declared: {node['mode']}")
-
-        elif node_type == "typed_keep":
-            var_name = node["name"]
-            value = node["value"]
-            # You can add type checks here if you want
-            self.variables[var_name] = value
-            print(f"[Variable] {var_name} (typed) = {value}")
-
-        elif node_type == "keep":
-            var_name = node["name"]
-            value_node = node["value"]
-
-            # Support receive call (input)
-            if isinstance(value_node, dict) and value_node.get("type") == "receive_call":
-                user_input = input(f"Input for {var_name}: ")
-                self.variables[var_name] = user_input
-                print(f"[Variable] {var_name} (received input) = {user_input}")
+    def execute(self):
+        self.consume('MODE_DECLARATION')
+        self.consume('START')
+        while True:
+            token = self.current_token()
+            if token is None:
+                raise RuntimeError("Missing 'end' keyword")
+            if token.type == 'SHOW':
+                self.execute_show()
+            elif token.type == 'END':
+                self.consume('END')
+                break
             else:
-                # Otherwise assign direct value
-                self.variables[var_name] = value_node
-                print(f"[Variable] {var_name} = {value_node}")
+                raise RuntimeError(f"Invalid token {token.type} at line {token.line}")
 
-        elif node_type == "show":
-            # node["expressions"] is a list of tokens or AST nodes (depending on your parser)
-            # For now, we simply print literals or variables if matched
-            output_parts = []
-            for expr in node.get("expressions", []):
-                # If expr is a Token or dict, you may need to handle accordingly
-                # For demo, assume expr is either:
-                # - Token with type IDENTIFIER: look up variable
-                # - Literal value (int, float, str)
-                if isinstance(expr, str):
-                    output_parts.append(expr)
-                elif isinstance(expr, dict):
-                    # Nested expression, not implemented here
-                    output_parts.append(str(expr))
-                else:
-                    # Could be a token with type and value
-                    try:
-                        val = self._eval_expr(expr)
-                        output_parts.append(str(val))
-                    except Exception:
-                        output_parts.append(str(expr))
-            print("[Output]", " ".join(output_parts))
-
-        else:
-            raise Exception(f"Unknown node type: {node_type}")
-
-    def _eval_expr(self, token):
-        # Simplified eval for expressions (could expand later)
-        # If token is a variable identifier, return variable value
-        # If token is literal, return its value
-
-        # token expected to be a Token object or dict or literal
-
-        if hasattr(token, "type"):
-            # Token object with .type and .value
-            if token.type.name == "IDENTIFIER":
-                return self.variables.get(token.value, f"<undefined {token.value}>")
-            else:
-                return token.value
-        elif isinstance(token, dict):
-            # Could be nested AST expr
-            # Not implemented yet
-            return str(token)
-        else:
-            # Plain literal
-            return token
+    def execute_show(self):
+        self.consume('SHOW')
+        self.consume('LBRACKET')
+        contents = []
+        while self.current_token() and self.current_token().type in ('NUMBER', 'TEXT'):
+            contents.append(self.consume().value)
+        self.consume('RBRACKET')
+        print(" ".join(contents))

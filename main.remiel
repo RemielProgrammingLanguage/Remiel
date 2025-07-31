@@ -1,16 +1,8 @@
 strict_mode
 
 start
-  note: this is a comment
-  explain:!
-    this is a
-    multi-line comment
-  !
-  natural keep [age] = 17
-  point keep [pi] = 3.14
-  text keep [name] = "Remiel"
-  flip keep [alive] = true
 
-  show [math { age + 2 }]
-  keep [user] = receive()
+show [ Hello 2025 ]
+show [ Remiel Language Works ]
+
 end
